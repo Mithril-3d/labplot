@@ -1,0 +1,136 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'doc/**'
+      - '*.md'
+      - '.gitignore'
+
+jobs:
+  build:
+    name: Build Windows Installer (Craft Qt6 MSVC)
+    runs-on: windows-2022
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Configure System for Craft
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+          # Create directory link to Python installation so KDE Craft's default C:\Python311 path is valid
+          $pythonExe = (Get-Command python.exe).Source
+          $pythonDir = Split-Path $pythonExe
+          Write-Host "Python located at: $pythonDir"
+          if (-not (Test-Path "C:\Python311")) {
+            cmd /c mklink /J "C:\Python311" "$pythonDir"
+          }
+
+          # Enable short path directory C:\_ and map drive Y:
+          New-Item -ItemType Directory -Path "C:\_" -Force | Out-Null
+          cmd /c subst Y: C:\_
+
+          # Create Craft directories
+          New-Item -ItemType Directory -Path "C:\Craft\downloads" -Force | Out-Null
+
+      - name: Clone KDE Craft Tools
+        shell: pwsh
+        run: |
+          git clone --depth=1 https://invent.kde.org/packaging/craftmaster.git C:\Craft\craftmaster
+          git clone --depth=1 https://invent.kde.org/sysadmin/craft-ci.git C:\Craft\craft-ci
+
+      - name: Create Craft Override Configuration
+        shell: pwsh
+        run: |
+          # Disable code signing and point download dir to existing local path
+          $override = @"
+          [GeneralSettings]
+          CodeSigning/Enabled = False
+          CodeSigning/SignCache = False
+          ContinuousIntegration/Enabled = False
+          Paths/DownloadDir = C:/Craft/downloads/
+
+          [windows-msvc2022_64-cl]
+          Paths/DownloadDir = C:/Craft/downloads/
+          "@
+          $override | Set-Content -Path "C:\Craft\override.ini" -Encoding utf8
+
+      - name: Bootstrap CraftMaster
+        shell: pwsh
+        run: |
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl --setup
+
+      - name: Update Craft Core
+        shell: pwsh
+        run: |
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -i --options virtual.ignored=True --update craft
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -i --update nsis
+
+      - name: Install Dependencies
+        shell: pwsh
+        run: |
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c --install-deps --options "[CodeSigning]Enabled=False" labplot
+
+      - name: Build LabPlot
+        shell: pwsh
+        run: |
+          $srcDir = "$((Get-Location).Path.Replace('\', '/'))/"
+          Write-Host "Source directory: $srcDir"
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c --no-cache --options "labplot.srcDir=$srcDir" labplot
+
+      - name: Package LabPlot Installer
+        shell: pwsh
+        run: |
+          $srcDir = "$((Get-Location).Path.Replace('\', '/'))/"
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c --package --options "labplot.srcDir=$srcDir" --options "[CodeSigning]Enabled=False" labplot
+
+      - name: Collect Installer Artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "installer-dist" -Force | Out-Null
+
+          # Query packageDestinationDir
+          $pkgDir = python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -q --get "packageDestinationDir()" virtual/base
+          Write-Host "Craft packageDestinationDir is: $pkgDir"
+
+          if ($pkgDir -and (Test-Path $pkgDir)) {
+            Get-ChildItem -Path $pkgDir -Recurse -Include *.exe, *.7z, *.zip, *.sha256 | ForEach-Object {
+              Write-Host "Found artifact in packageDir: $($_.FullName)"
+              Copy-Item $_.FullName -Destination "installer-dist" -Force
+            }
+          }
+
+          # Also check under C:\Craft for any generated labplot installers just in case
+          Get-ChildItem -Path "C:\Craft" -Recurse -Include *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*labplot*" -or $_.Name -like "*LabPlot*" } | ForEach-Object {
+            Write-Host "Found installer: $($_.FullName)"
+            Copy-Item $_.FullName -Destination "installer-dist" -Force
+          }
+
+          Write-Host "Collected artifacts:"
+          Get-ChildItem -Path "installer-dist"
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabPlot-Windows-Installer
+          path: installer-dist/*
+          if-no-files-found: error
