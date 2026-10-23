@@ -16,6 +16,9 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 180
 
+    env:
+      PYTHONUTF8: "1"
+
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -88,7 +91,18 @@ jobs:
       - name: Install Dependencies
         shell: pwsh
         run: |
-          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -vv --install-deps --options "[CodeSigning]Enabled=False" labplot
+          try {
+            python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --config-override .craft.ini --target windows-msvc2022_64-cl -c -vv --install-deps --options "[CodeSigning]Enabled=False" labplot
+            if ($LASTEXITCODE -ne 0) { throw "Craft returned exit code $LASTEXITCODE" }
+          } catch {
+            Write-Host "::error::Install Dependencies Failed: $_"
+            $logs = Get-ChildItem -Path "C:\Craft" -Recurse -Filter "*.log" -ErrorAction SilentlyContinue
+            foreach ($log in $logs) {
+              $lines = (Get-Content $log.FullName -Tail 15) -join " "
+              Write-Host "::error title=$($log.Name)::$lines"
+            }
+            exit 1
+          }
 
       - name: Build LabPlot
         shell: pwsh
