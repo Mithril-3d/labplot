@@ -49,6 +49,14 @@ jobs:
             cmd /c mklink /J "C:\Python311" "$pythonDir"
           }
 
+          # Link MSYS2 if available in C:\msys64 to C:\Msys2 (KDE Craft default in CraftConfig.ini)
+          if (Test-Path "C:\msys64") {
+            Write-Host "Found MSYS2 at C:\msys64"
+            if (-not (Test-Path "C:\Msys2")) {
+              cmd /c mklink /J "C:\Msys2" "C:\msys64"
+            }
+          }
+
           # Enable short path directory C:\_ and map drive Y:
           New-Item -ItemType Directory -Path "C:\_" -Force | Out-Null
           cmd /c subst Y: C:\_
@@ -65,16 +73,21 @@ jobs:
       - name: Create Craft Override Configuration
         shell: pwsh
         run: |
-          # Disable code signing and point download dir to existing local path
+          # Disable code signing, point download dir and MSYS2 to existing local paths
           $override = @"
+          [Variables]
+          Msys = C:/msys64
+
           [GeneralSettings]
           CodeSigning/Enabled = False
           CodeSigning/SignCache = False
           ContinuousIntegration/Enabled = False
           Paths/DownloadDir = C:/Craft/downloads/
+          Paths/Msys = C:/msys64/
 
           [windows-msvc2022_64-cl]
           Paths/DownloadDir = C:/Craft/downloads/
+          Paths/Msys = C:/msys64/
           "@
           $override | Set-Content -Path "C:\Craft\override.ini" -Encoding utf8
 
