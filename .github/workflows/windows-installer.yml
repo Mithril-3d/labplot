@@ -88,26 +88,26 @@ jobs:
       - name: Install Dependencies
         shell: pwsh
         run: |
-          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c --install-deps --options "[CodeSigning]Enabled=False" labplot
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -vv --install-deps --options "[CodeSigning]Enabled=False" labplot
 
       - name: Build LabPlot
         shell: pwsh
         run: |
           $srcDir = "$((Get-Location).Path.Replace('\', '/'))/"
           Write-Host "Source directory: $srcDir"
-          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c --no-cache --options "labplot.srcDir=$srcDir" labplot
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -vv --no-cache --options "labplot.srcDir=$srcDir" labplot
 
       - name: Ensure NSIS Packager Tool
         shell: pwsh
         continue-on-error: true
         run: |
-          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -i --update dev-utils/nsis
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -vv -i --update dev-utils/nsis
 
       - name: Package LabPlot Installer
         shell: pwsh
         run: |
           $srcDir = "$((Get-Location).Path.Replace('\', '/'))/"
-          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c --package --options "labplot.srcDir=$srcDir" --options "[CodeSigning]Enabled=False" labplot
+          python C:\Craft\craftmaster\CraftMaster.py --config C:\Craft\craft-ci\qt6\CraftConfig.ini --config-override C:\Craft\override.ini --target windows-msvc2022_64-cl -c -vv --package --options "labplot.srcDir=$srcDir" --options "[CodeSigning]Enabled=False" labplot
 
       - name: Collect Installer Artifacts
         shell: pwsh
@@ -140,6 +140,19 @@ jobs:
           name: LabPlot-Windows-Installer
           path: installer-dist/*
           if-no-files-found: error
+
+      - name: Dump Craft Logs to Console on Failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "=== DUMPING CRAFT LOG FILES ==="
+          $logFiles = Get-ChildItem -Path "C:\Craft" -Recurse -Filter "*.log" -ErrorAction SilentlyContinue
+          foreach ($file in $logFiles) {
+            Write-Host "--------------------------------------------------"
+            Write-Host "LOG FILE: $($file.FullName)"
+            Write-Host "--------------------------------------------------"
+            Get-Content $file.FullName -Tail 150
+          }
 
       - name: Upload Diagnostic Logs on Failure
         if: failure()
